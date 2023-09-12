@@ -35,7 +35,7 @@ declare -rg SCRIPT_DIR="$(dirname $(readlink -f "$0"))"
 source "$SCRIPT_DIR/utils.sh"
 
 # Define the programs to check and install
-declare -rga programs=("libimage-exiftool-perl" "binutils" "foremost" "bulk-extractor" "tshark" "zip" "git") #TODO Volotility
+declare -rga programs=("libimage-exiftool-perl" "binwalk" "binutils" "foremost" "bulk-extractor" "tshark" "zip" "git") #TODO Volotility
 # Define the paths
 # script_dir="$(dirname '$0')"
 # [[ $script_dir == "." ]] && script_dir=$(pwd)
@@ -105,7 +105,7 @@ use_user_privileges() {
 
 install_vol() {
 	[ -d "$VOL_DIR" ] && return 0
-	echo -e "${GREEN}[+]${CYAN} Installing volatility..."
+	# echo -e "${GREEN}[+]${CYAN} Installing volatility..."
 
 	(
 		sudo -u "$USERNAME" git clone https://github.com/volatilityfoundation/volatility3.git
@@ -113,28 +113,16 @@ install_vol() {
 		pip3 install -r "$VOL_DIR/requirements.txt"
 	) &>/dev/null
 
-	local checksums="$VOL_DIR/volatility3/symbols/checksum.txt"
-	--check-certificate --input-file="$checksums"
-	wget -O "$checksums" https://downloads.volatilityfoundation.org/volatility3/symbols/SHA256SUMS
+	# local checksums="$VOL_DIR/volatility3/symbols/checksum.txt"
+	# wget -O "$checksums" https://downloads.volatilityfoundation.org/volatility3/symbols/SHA256SUMS
 
-	wget -O "$VOL_DIR/volatility3/symbols/windows.zip" https://downloads.volatilityfoundation.org/volatility3/symbols/windows.zip --check-certificate --input-file="$checksums"
+	# wget -O "$VOL_DIR/volatility3/symbols/windows.zip" https://downloads.volatilityfoundation.org/volatility3/symbols/windows.zip --check-certificate --input-file="$checksums"
 	# wget -O "$VOL_DIR/volatility3/symbols/mac.zip" https://downloads.volatilityfoundation.org/volatility3/symbols/mac.zip --check-certificate --input-file="$checksums"
 	# wget -O "$VOL_DIR/volatility3/symbols/linux.zip" https://downloads.volatilityfoundation.org/volatility3/symbols/linux.zip --check-certificate --input-file="$checksums"
 
-	find ./volatility3/volatility3/symbols -name '*.zip' -print0 | xargs -0 -I {} unzip {} -d ./volatility3/volatility3/symbols/
-
-	rm "./volatility3/volatility3/symbols/*.zip"
+	# find ./volatility3/volatility3/symbols -name '*.zip' -print0 | xargs -0 -I {} unzip {} -d ./volatility3/volatility3/symbols/
+	# rm "./volatility3/volatility3/symbols/*.zip"
 	
-
-
-	# python3 volatility3/vol.py
-
-	# chmod -R 644 "$VOL_DIR"
-	# chmod 755 "$VOL_DIR"
-	# chmod 755 "$VOL_PATH"
-	# rm volatility_2.6_lin64_standalone.zip
-	
-
 }
 
 decorated_install_vol() {
@@ -158,16 +146,23 @@ function with_loading_animation() {
     echo -e "$msg    "
 }
 
-# Decorate the functions
-decorated_run_exiftool() {
-    # with_loading_animation "Running ExifTool" \
-		# run_exiftool
-    with_loading_animation "Running ExifTool" \
-		run_exiftool
-}
-
 run_exiftool() {
 	exiftool -a "$target_file" > "$EXIF_PATH"
+}
+
+run_binwalk() {
+	binwalk -B "$target_file" > "$BINWALK_PATH"
+}
+
+# Decorate the functions
+decorated_run_exiftool() {
+    with_loading_animation "Running ExifTool" \
+		run_exiftool 
+}
+
+decorated_run_binwalk() {
+    with_loading_animation "Running binwalk" \
+		run_binwalk 
 }
 
 decorated_run_foremost() {
@@ -183,6 +178,11 @@ decorated_run_bulk() {
 decorated_run_strings() {
     with_loading_animation "Running Strings " \
 		run_strings
+}
+
+decorated_run_vol() {
+    with_loading_animation "Running Volatility " \
+		run_vol
 }
 
 run_strings() {
@@ -235,11 +235,13 @@ run_vol() {
 	"$VOL_PATH" -f "$target_file" windows.pstree 2>/dev/null > "$VOL_LOG_PATH"_process.txt
 
 	echo -e "${GREEN}[+]${CYAN} Running Memory Analysis: MalProcess" 
+	
 	process_double_link=$(mktemp)
 	process_unlinked=$(mktemp)
+	
 	"$VOL_PATH" -f "$target_file" windows.pslist 2>/dev/null | awk 'NR>4 {print $3 " " $1 ":" $2}' | sort -V > "$process_double_link"
 	"$VOL_PATH" -f "$target_file" windows.psscan 2>/dev/null | awk 'NR>4 {print $3 " " $1 ":" $2}' | sort -V > "$process_unlinked"
-	diff "$process_double_link" "$process_unlinked" > "$VOL_LOG_PATH"_process_malicious
+	diff "$process_double_link" "$process_unlinked" > "$VOL_LOG_PATH"_process_malicious.txt
 	rm "$process_double_link" "$process_unlinked"
 
 	#TODO if mal is found, dump file,dll,etc..
@@ -285,14 +287,14 @@ main() {
 	check_target "$target_file"
 
 	install_programs "${programs[@]}"
-	install_vol
+	decorated_install_vol #FIXME set owner as user (__pycache__)
 
-	echo -ne "${GREEN}[*] ${BLUE}"
-	echo -e "Starting Analysis"
+	echo -e "\n${GREEN}[*] ${BLUE}Starting Analysis"
 
 
 	local report_id=$(date +%s)
 	EXIF_PATH="$SCAN_PATH/$report_id/exiftool.txt"
+	BINWALK_PATH="$SCAN_PATH/$report_id/binwalk.txt"
 	FOREMOST_PATH="$SCAN_PATH/$report_id/foremost"
 	BULK_PATH="$SCAN_PATH/$report_id/bulk"
 	STRINGS_PATH_PATTERN="$SCAN_PATH/$report_id/strings"
@@ -303,9 +305,11 @@ main() {
 	sudo -u "$USERNAME" mkdir -p "$FOREMOST_PATH"
 	sudo -u "$USERNAME" mkdir -p "$BULK_PATH"
 	sudo -u "$USERNAME" touch "$EXIF_PATH"
+	sudo -u "$USERNAME" touch "$BINWALK_PATH"
 	# sudo -u "$USERNAME" touch "$STRINGS_PATH"
 	
 	decorated_run_exiftool
+	decorated_run_binwalk 
 	decorated_run_foremost
 	decorated_run_bulk
 	get_pcap
