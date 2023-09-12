@@ -2,17 +2,17 @@
 # set -x
 ################################################################################
 #                                                                              #
-# WF.sh																	       #
+# WF.sh									       #
 #                                                                              #
 # version: 1.0.0                                                               #
 #                                                                              #
-# Network Research - Remote target scanning using tor and a remote server      #
-#																			   #
-# Srudent Name - Michael Ivlev												   #
-# Student Code - S11														   #
-# Class Code - HMagen773616													   #
-# Lectures Name - Eliran Berkovich											   #
-#																			   #
+# Analyzer - Cyber units operating in an automated way. #
+#									       #
+# Student Name - Michael Ivlev						       #
+# Student Code - S11						               #
+# Class Code - HMagen773616                                                    #
+# Lectures Name - Eliran Berkovich					       #
+#									       #
 # GNU GENERAL PUBLIC LICENSE                                                   #
 #                                                                              #
 # This program is free software: you can redistribute it and/or modify         #
@@ -35,10 +35,8 @@ declare -rg SCRIPT_DIR="$(dirname $(readlink -f "$0"))"
 source "$SCRIPT_DIR/utils.sh"
 
 # Define the programs to check and install
-declare -rga programs=("libimage-exiftool-perl" "binwalk" "binutils" "foremost" "bulk-extractor" "tshark" "zip" "git") #TODO Volotility
+declare -rga programs=("libimage-exiftool-perl" "binwalk" "binutils" "foremost" "bulk-extractor" "tcpdump" "zip" "git") 
 # Define the paths
-# script_dir="$(dirname '$0')"
-# [[ $script_dir == "." ]] && script_dir=$(pwd)
 declare -rg VOL_DIR="./volatility3"
 declare -rg VOL_PATH="./volatility3/vol.py"
 # path to the scripts log file
@@ -46,23 +44,13 @@ declare -rg LOG_PATH="/var/log/wf.log"
 # get user name
 declare -rg USERNAME="${SUDO_USER:-$USER}"
 # path to saved scans
-declare -rg SCAN_PATH="$(pwd)" #"$(grep -w $USERNAME /etc/passwd | cut -d: -f 6)/Documents"
-# flag for different echo style
-# is_cow_time=false
-
-
+declare -rg SCAN_PATH="$(pwd)" 
 # Function to display the correct way to run the script
 usage() {
 	local script_name=$(basename "$0")
 cat << EOF
 Usage: $script_name [Options] {target_file}
 -h Describe how to run the script
--r Revert the network setting (i.e. before routing trafic through the tor network)
--m Choose the remote level of abstraction:
-	0 localhost 
-	1 lan range
-	2 public ip range 
-	3 hidden service
  
 EOF
 }
@@ -92,8 +80,6 @@ init_checks() {
 
 check_target() {
 	[ ! -f "$1" ] && fail "the file ($1) doesn't exist"
-	# local ext="${1##*.}"
-	# [ "$ext" != "mem" ] && [ "$ext" != "dd" ] && fail "Invalid file format (.$ext)"
 	local filetype=$(file -b --mime-encoding "$1")
 	[ "$filetype" == "binary" ] || fail "Invalid file encoding ($filetype)"
 	echo -e "${GREEN}[*] ${BLUE}File $1 exists\n${NC}"
@@ -105,24 +91,10 @@ use_user_privileges() {
 
 install_vol() {
 	[ -d "$VOL_DIR" ] && return 0
-	# echo -e "${GREEN}[+]${CYAN} Installing volatility..."
-
 	(
 		sudo -u "$USERNAME" git clone https://github.com/volatilityfoundation/volatility3.git
-		#FIXME works only in cli #chown -R "$USERNAME:$USERNAME" "$VOL_DIR"
 		pip3 install -r "$VOL_DIR/requirements.txt"
 	) &>/dev/null
-
-	# local checksums="$VOL_DIR/volatility3/symbols/checksum.txt"
-	# wget -O "$checksums" https://downloads.volatilityfoundation.org/volatility3/symbols/SHA256SUMS
-
-	# wget -O "$VOL_DIR/volatility3/symbols/windows.zip" https://downloads.volatilityfoundation.org/volatility3/symbols/windows.zip --check-certificate --input-file="$checksums"
-	# wget -O "$VOL_DIR/volatility3/symbols/mac.zip" https://downloads.volatilityfoundation.org/volatility3/symbols/mac.zip --check-certificate --input-file="$checksums"
-	# wget -O "$VOL_DIR/volatility3/symbols/linux.zip" https://downloads.volatilityfoundation.org/volatility3/symbols/linux.zip --check-certificate --input-file="$checksums"
-
-	# find ./volatility3/volatility3/symbols -name '*.zip' -print0 | xargs -0 -I {} unzip {} -d ./volatility3/volatility3/symbols/
-	# rm "./volatility3/volatility3/symbols/*.zip"
-	
 }
 
 decorated_install_vol() {
@@ -156,12 +128,12 @@ run_binwalk() {
 
 # Decorate the functions
 decorated_run_exiftool() {
-    with_loading_animation "Running ExifTool" \
+    with_loading_animation "Running ExifTool " \
 		run_exiftool 
 }
 
 decorated_run_binwalk() {
-    with_loading_animation "Running binwalk" \
+    with_loading_animation "Running binwalk " \
 		run_binwalk 
 }
 
@@ -188,16 +160,29 @@ decorated_run_vol() {
 run_strings() {
 	sudo -u "$USERNAME" touch "$STRINGS_PATH_PATTERN".txt
 	sudo -u "$USERNAME" touch "$STRINGS_PATH_PATTERN"_exe.txt
+	sudo -u "$USERNAME" touch "$STRINGS_PATH_PATTERN"_dll.txt
+	sudo -u "$USERNAME" touch "$STRINGS_PATH_PATTERN"_username.txt
+	sudo -u "$USERNAME" touch "$STRINGS_PATH_PATTERN"_password.txt
+	sudo -u "$USERNAME" touch "$STRINGS_PATH_PATTERN"_user-agent.txt
 	# user-agent
 
 	strings "$target_file" > "$STRINGS_PATH_PATTERN".txt
-	grep -Eo ".*\.exe" "$STRINGS_PATH_PATTERN.txt" | awk '{print $NF}' | sort -fu > "$STRINGS_PATH_PATTERN"_exe.txt
+	grep -Eo ".*\.exe" "$STRINGS_PATH_PATTERN.txt" | awk '{print $NF}' | sort -u > "$STRINGS_PATH_PATTERN"_exe.txt
+		
+	strings "$target_file" > "$STRINGS_PATH_PATTERN".txt
+	grep -i "username" "$STRINGS_PATH_PATTERN.txt" | awk '{print $NF}' | sort -u > "$STRINGS_PATH_PATTERN"_username.txt
+
+	strings "$target_file" > "$STRINGS_PATH_PATTERN".txt
+	grep -i "password" "$STRINGS_PATH_PATTERN.txt" | awk '{print $NF}' | sort -u > "$STRINGS_PATH_PATTERN"_password.txt
+
+	strings "$target_file" > "$STRINGS_PATH_PATTERN".txt
+	grep -i "user-agent" "$STRINGS_PATH_PATTERN.txt" | awk '{print $NF}' | sort -u > "$STRINGS_PATH_PATTERN"_user-agent.txt
 }
 
 run_vol() {
 	sudo -u "$USERNAME" touch "$VOL_LOG_PATH"_process.txt
 	sudo -u "$USERNAME" touch "$VOL_LOG_PATH"_process_malicious.txt
-	# sudo -u "$USERNAME" touch "$VOL_LOG_PATH"_connections.txt
+	# sudo -u "$USERNAME" touch "$VOL_LOG_PATH"_connections.txt #deprecate in vol3
 	sudo -u "$USERNAME" touch "$VOL_LOG_PATH"_commands.txt
 	sudo -u "$USERNAME" touch "$VOL_LOG_PATH"_registry.txt
 	sudo -u "$USERNAME" touch "$VOL_LOG_PATH"_userassist.txt
@@ -205,22 +190,6 @@ run_vol() {
 	sudo -u "$USERNAME" touch "$VOL_LOG_PATH"_SYSTEM.txt
 	sudo -u "$USERNAME" touch "$VOL_LOG_PATH"_hashes.txt
 	sudo -u "$USERNAME" touch "$VOL_LOG_PATH"_accounts.txt
-
-
-	# verinfo
-	# vadwalk
-	# vadinfo
-	# svcscan
-	# ssdt
-	# sessions
-	# hashdump # only dump2.mem
-	# privileges
-	# poolscanner
-	# netstat # not for all mem files
-	# netscan # same, #TODO use bulk_extractor
-	# m*
-	# malfind. This plugin will attempt to identify injected processes
-
 
 	local strings_msg="Running volatility "
 	echo -ne "\r${GREEN}[+] ${CYAN}"
@@ -248,9 +217,6 @@ run_vol() {
 	# vol.py -f <dump> -o /dir/to/store_dump/ windows.memmap.Memmap --pid <suspicious PID> --dump
 	# strings *.dmp | grep -i "user-agent\|http"
 	# dlllist | grep -w pid | grep -w exe (first lines might give the location of mal)
-
-	# echo -e "${GREEN}[+]${CYAN} Running Memory Analysis: Network" 
-	# "$VOL_PATH" -f "$target_file" windows.connections 2>/dev/null > "$VOL_LOG_PATH"_connections.txt
 
 	echo -e "${GREEN}[+]${CYAN} Running Memory Analysis: Commands" 
 	"$VOL_PATH" -f "$target_file" windows.cmdline 2>/dev/null > "$VOL_LOG_PATH"_commands.txt
@@ -318,7 +284,7 @@ main() {
 
 	local bulk_count=$(find "$BULK_PATH" -type f | wc -l)
 	local foremost_count=$(( $(find "$FOREMOST_PATH" -type f | wc -l) - 1 ))
-	local pcap_count=0; [ -f "$PCAP_PATH" ] && pcap_count=$(tshark -r "$PCAP_PATH" -q -z "io,phs" | grep -m 1 -w ip | awk '{print $2}' | awk -F: '{print $NF}')
+	local pcap_count=0; [ -f "$PCAP_PATH" ] && pcap_count=$(tcpdump -r "$PCAP_PATH" 2>/dev/null | wc -l)
 	local strings_count=$(find "$SCAN_PATH/$report_id" -name "strings*" | wc -l )
 	local vol_count=$(find "$SCAN_PATH/$report_id" -name "volatility*" | wc -l )
 	local total_count=$((bulk_count + foremost_count + pcap_count + strings_count + vol_count))
@@ -337,12 +303,13 @@ main() {
 	find "$FOREMOST_PATH" -type f | awk -F/ '{print $NF}' 
 	echo -e "\nDOMAINS:" 
 	strings "$STRINGS_PATH_PATTERN.txt" | grep -Eo "http?://.*(| )" | sed 's/ /\n/g' | grep -Eo "http?://.*$" | cut -d / -f 3- | awk -F/ '{sub(/^www\./, "", $1); if ($1 && $1 ~ /\./ && $1 !~ /:/) print $1}'| sort | uniq -c | sort -nr | awk '{print $NF}' 
-
-	# cat 1691941379/bulk/domain.txt | awk '{sub(/^www\./, "", $2); if ($2 && $2 ~ /\./)print $2}' | awk '{if($1 !~ /^[0-9]/) print $1}'| sort -u
 	
-	#FIXME histogram doesnt echo
-	[ -f "$BULK_PATH/ip_histrogram.txt" ] && echo -e "\nIPs: (shown as histogram)" && cat "$BULK_PATH"/ip_histogram.txt
-	cat "$BULK_PATH/ip_histogram.txt"
+	[ -n "$(ls ${STRINGS_PATH_PATTERN}_*)" ] && echo -e "\nStrings:"
+	for file in $(ls ${STRINGS_PATH_PATTERN}_* ); do echo -e "\n$file:"; cat "$file"; done
+
+	[ -s "${BULK_PATH}/ip_histogram.txt" ] && echo -e "\nIPs: (shown as histogram)" && cat "$BULK_PATH"/ip_histogram.txt | awk 'NR>5'
+	
+	[ -s "${BULK_PATH}/email_histogram.txt" ] && echo -e "\nEmails: (shown as histogram)" && cat "$BULK_PATH"/ip_histogram.txt | awk 'NR>5'
 
 	) >> "$REPORT_TXT_PATH"
 
@@ -352,7 +319,6 @@ main() {
 	sudo -u "$USERNAME" zip -r "$zip_name" "$report_id"/* &>/dev/null
 	echo -e "\n${GREEN}[*]${CYAN} Forensics analysis completed [$zip_name]"
 
-	# say "Have a good day"
 }
 
 main "${@}"
